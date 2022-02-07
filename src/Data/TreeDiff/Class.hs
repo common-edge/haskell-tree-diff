@@ -20,8 +20,9 @@ module Data.TreeDiff.Class (
     GToExpr,
     ) where
 
+import Data.Bifunctor (bimap)
 import Data.Foldable    (toList)
-import Data.List        (sort)
+import Data.List        (sort, intercalate)
 import Data.List.Compat (uncons)
 import Data.Proxy       (Proxy (..))
 import GHC.Generics
@@ -401,11 +402,28 @@ instance ToExpr a => ToExpr (Semi.Last a) where
 -- containers
 -------------------------------------------------------------------------------
 
+-- | Nicer "show" for Expr type
+-- This can be used in Map's ToExpr instance definition without replacing
+-- 'ToExpr k' constraint with 'Show k' in order to avoid adding (Show k) to
+-- all types containing Maps
+showExpr :: Expr -> String
+showExpr (App s []) = s
+showExpr (App s es) = s <> " " <> unwords (wrap . showExpr <$> es)
+showExpr (Rec s es) = s <> " {" <> intercalate "," [k <> " = " <> showExpr e | (k,e) <- OMap.toList es] <> "}"
+showExpr (Lst es)   = unwords (wrap . showExpr <$> es)
+
+wrap :: String -> String
+wrap s | words s == [s] = s
+       | otherwise      = "(" <> s <> ")"
+
+toExprShow :: (ToExpr a) => a -> String
+toExprShow = showExpr . toExpr
+
 instance ToExpr a => ToExpr (Tree.Tree a) where
     toExpr (Tree.Node x xs) = App "Node" [toExpr x, toExpr xs]
 
 instance (ToExpr k, ToExpr v) => ToExpr (Map.Map k v) where
-    toExpr x = App "Map.fromList" [ toExpr $ Map.toList x ]
+    toExpr x = Rec "Map" $ OMap.fromList $ fmap (bimap toExprShow toExpr) $ Map.toList x
 instance (ToExpr k) => ToExpr (Set.Set k) where
     toExpr x = App "Set.fromList" [ toExpr $ Set.toList x ]
 instance (ToExpr v) => ToExpr (IntMap.IntMap v) where
@@ -551,7 +569,7 @@ instance ToExpr a => ToExpr (Hashed a) where
 -------------------------------------------------------------------------------
 
 instance (ToExpr k, ToExpr v) => ToExpr (HM.HashMap k v) where
-    toExpr x = App "HM.fromList" [ Lst $ sort $ map toExpr $ HM.toList x ]
+    toExpr x = Rec "HashMap" $ OMap.fromList $ fmap (bimap toExprShow toExpr) $ HM.toList x
 instance (ToExpr k) => ToExpr (HS.HashSet k) where
     toExpr x = App "HS.fromList" [ Lst $ sort $ map toExpr $ HS.toList x ]
 
